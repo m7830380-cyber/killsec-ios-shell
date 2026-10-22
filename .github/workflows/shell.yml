@@ -1,0 +1,116 @@
+name: iOS shell IPA
+
+# Builds an iOS app that contains ONLY the official Godot 4.7.1 engine (official export template),
+# a tiny placeholder project and a native crash logger. No game files of any kind are used here.
+# The game is inserted afterwards, outside this repository.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: shell
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: 4.7.1
+
+jobs:
+  shell:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore Godot
+        id: godot-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/godot
+          key: godot-${{ env.GODOT_VERSION }}-ios-v1
+
+      - name: Download Godot ${{ env.GODOT_VERSION }}
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p ~/godot && cd ~/godot
+          BASE=https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-stable
+          curl -fsSL --retry 3 -o editor.zip "$BASE/Godot_v${GODOT_VERSION}-stable_macos.universal.zip"
+          curl -fsSL --retry 3 -o templates.tpz "$BASE/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          unzip -q editor.zip && rm editor.zip
+          unzip -q templates.tpz templates/ios.zip templates/version.txt && rm templates.tpz
+          ls -la ~/godot ~/godot/templates
+
+      - name: Save Godot
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/godot
+          key: godot-${{ env.GODOT_VERSION }}-ios-v1
+
+      - name: Install export template
+        run: |
+          set -euo pipefail
+          T="$HOME/Library/Application Support/Godot/export_templates/${GODOT_VERSION}.stable"
+          mkdir -p "$T"
+          cp ~/godot/templates/ios.zip ~/godot/templates/version.txt "$T/"
+          echo "GODOT=$HOME/godot/Godot.app/Contents/MacOS/Godot" >> "$GITHUB_ENV"
+
+      - name: Export Xcode project
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          "$GODOT" --headless --path shell --import 2>&1 | tail -n 5
+          "$GODOT" --headless --path shell --export-release iOS "$PWD/build/KILLSEC.xcodeproj" 2>&1 | tail -n 30
+          ls -la build build/KILLSEC
+
+      - name: Add crash handler
+        run: |
+          set -euo pipefail
+          cat native/crash_handler.inc >> build/KILLSEC/dummy.cpp
+          /usr/libexec/PlistBuddy -c Print build/KILLSEC/KILLSEC-Info.plist
+
+      - name: Xcode build (unsigned)
+        run: |
+          set -euo pipefail
+          ls -d /Applications/Xcode_*.app
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | sort -V | tail -n 1)"
+          xcodebuild -version
+          set +e
+          xcodebuild -project build/KILLSEC.xcodeproj -scheme KILLSEC -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/dd \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" \
+            build > build/xcodebuild.log 2>&1
+          rc=$?
+          set -e
+          grep -E "error:|\*\* BUILD" build/xcodebuild.log | head -n 60 || true
+          [ $rc = 0 ] || { tail -n 80 build/xcodebuild.log; exit $rc; }
+
+      - name: Fakesign + package
+        run: |
+          set -euo pipefail
+          brew install ldid >/dev/null
+          APP="$(find build/dd -path '*Release-iphoneos/*.app' -maxdepth 4 | head -n 1)"
+          rm -rf Payload && mkdir Payload && cp -R "$APP" Payload/
+          ldid -S Payload/KILLSEC.app/KILLSEC
+          ls -la Payload/KILLSEC.app
+          zip -qry KILLSEC-shell.ipa Payload
+          ls -lh KILLSEC-shell.ipa
+
+      - name: Publish shell-latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=shell-latest
+          NOTES="Engine-only shell (official Godot ${GODOT_VERSION}), build ${GITHUB_RUN_NUMBER} from ${GITHUB_SHA::7}. Contains no game files."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" KILLSEC-shell.ipa --clobber
+            gh release edit "$TAG" --notes "$NOTES"
+          else
+            gh release create "$TAG" KILLSEC-shell.ipa --title "iOS shell (engine only)" --notes "$NOTES" --prerelease
+          fi

@@ -1,0 +1,4 @@
+build/
+shell/.godot/
+*.ipa
+*.pck

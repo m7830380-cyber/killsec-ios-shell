@@ -1,0 +1,18 @@
+; Shell project: only used to make Godot write the iOS Xcode project (engine only, no game files).
+config_version=5
+
+[application]
+
+config/name="KILLSEC"
+config/icon="res://icon.png"
+boot_splash/bg_color=Color(0.0647, 0.0647, 0.0647, 1)
+
+[display]
+
+window/handheld/orientation=4
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/vram_compression/import_etc2_astc=true
