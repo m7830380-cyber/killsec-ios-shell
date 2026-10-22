@@ -78,7 +78,7 @@ jobs:
         run: |
           set -euo pipefail
           ls -d /Applications/Xcode_*.app
-          sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | sort -V | tail -n 1)"
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -n 1)"
           xcodebuild -version
           set +e
           xcodebuild -project build/KILLSEC.xcodeproj -scheme KILLSEC -configuration Release \
