@@ -1,6 +1,6 @@
 name: iOS shell IPA
 
-# Builds an iOS app that contains ONLY the official Godot 4.7.1 engine (official export template),
+# Builds an iOS app that contains ONLY the official Godot engine (official export template),
 # a tiny placeholder project and a native crash logger. No game files of any kind are used here.
 # The game is inserted afterwards, outside this repository.
 
@@ -8,16 +8,20 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      godot_version:
+        description: Official Godot version (4.7.1 -> release shell-latest, others -> shell-<version>)
+        default: 4.7.1
 
 permissions:
   contents: write
 
 concurrency:
-  group: shell
+  group: shell-${{ inputs.godot_version || '4.7.1' }}
   cancel-in-progress: true
 
 env:
-  GODOT_VERSION: 4.7.1
+  GODOT_VERSION: ${{ inputs.godot_version || '4.7.1' }}
 
 jobs:
   shell:
@@ -107,10 +111,11 @@ jobs:
         run: |
           set -euo pipefail
           TAG=shell-latest
+          [ "$GODOT_VERSION" = 4.7.1 ] || TAG="shell-$GODOT_VERSION"
           NOTES="Engine-only shell (official Godot ${GODOT_VERSION}), build ${GITHUB_RUN_NUMBER} from ${GITHUB_SHA::7}. Contains no game files."
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" KILLSEC-shell.ipa --clobber
             gh release edit "$TAG" --notes "$NOTES"
           else
-            gh release create "$TAG" KILLSEC-shell.ipa --title "iOS shell (engine only)" --notes "$NOTES" --prerelease
+            gh release create "$TAG" KILLSEC-shell.ipa --title "iOS shell, Godot $GODOT_VERSION (engine only)" --notes "$NOTES" --prerelease
           fi
